@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Movies</title>
+<style>
+  :root{--bg:#0f1220;--card:#1a1f35;--ink:#e7e9f3;--muted:#9aa3c7;--accent:#6c8cff;--line:#2a3050;--ok:#3ddc97;--bad:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink)}
+  header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line)}
+  h1{font-size:20px;margin:0;flex:1}
+  #status{font:13px ui-monospace,monospace;color:var(--muted);padding:4px 10px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+  #status b{color:var(--ok)} #status.err b{color:var(--bad)}
+  main{max-width:960px;margin:0 auto;padding:24px;display:grid;gap:18px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap}
+  input, select{font:inherit;background:#0c0f1c;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;min-width:0}
+  button{font:inherit;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px}
+  .card h3{margin:0 0 4px;font-size:18px}
+  .meta{color:var(--muted);font-size:14px}
+  .badge{display:inline-block;margin:10px 0;font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .badge.seen{color:var(--ok);border-color:var(--ok)}
+  .card button{background:transparent;color:var(--muted);border:1px solid var(--line);padding:8px;align-self:start}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}
+  .panel.err{border-color:var(--bad);color:var(--bad)}
+  .form-row{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+  .form-row > label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--muted)}
+  .form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .small{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+  <header><h1>🎬 My Movies</h1><span id="status">ready</span></header>
+  <main>
+    <section class="panel">
+      <div class="bar">
+        <input id="directorFilter" type="text" placeholder="Filter by director">
+        <button type="button" onclick="load()">Filter</button>
+        <button type="button" onclick="resetFilter()">Clear</button>
+      </div>
+      <form id="createForm" onsubmit="createMovie(event)">
+        <h2>Add a movie</h2>
+        <div class="form-row">
+          <label>Title<input id="titleInput" type="text" required></label>
+          <label>Director<input id="directorInput" type="text" required></label>
+        </div>
+        <div class="form-row">
+          <label>Year<input id="yearInput" type="number" min="1888" required></label>
+          <label>Watched<select id="watchedInput"><option value="false">No</option><option value="true">Yes</option></select></label>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Add movie</button>
+          <button type="reset">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="detail" class="panel" hidden></section>
+    <section id="list" class="grid"></section>
+  </main>
+<script>
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const show = (m, p, status, ok) => { const s = $("#status"); s.className = ok ? "" : "err"; s.innerHTML = `${m} ${p} → <b>${status}</b>`; };
+
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: body ? {"Content-Type": "application/json"} : {},
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await res.json().catch(() => null);
+    show(method, path, res.status, res.ok);
+    return { status: res.status, data };
+  }
+
+  const card = movie => `<div class="card">
+    <h3>${esc(movie.title)}</h3>
+    <div class="meta">${esc(movie.director)} · ${movie.year}</div>
+    <span class="badge ${movie.watched ? "seen" : ""}">${movie.watched ? "watched" : "unwatched"}</span>
+    <div class="form-actions">
+      <button type="button" onclick="openDetail(${movie.id})">View</button>
+      <button type="button" onclick="deleteMovie(${movie.id})">Delete</button>
+    </div>
+  </div>`;
+
+  async function load() {
+    const director = $("#directorFilter").value.trim();
+    const path = director ? `/movies?director=${encodeURIComponent(director)}` : '/movies';
+    const { data } = await api('GET', path);
+    const movies = Array.isArray(data) ? data : [];
+    $("#list").innerHTML = movies.length ? movies.map(card).join('') : '<p class="meta">No movies found.</p>';
+  }
+
+  function resetFilter() {
+    $("#directorFilter").value = '';
+    load();
+  }
+
+  async function openDetail(id) {
+    if (id === '' || id == null) return;
+    const { status, data } = await api('GET', `/movies/${id}`);
+    const detail = $("#detail");
+    detail.hidden = false;
+    if (status === 404) {
+      detail.className = 'panel err';
+      detail.innerHTML = `<b>404 — not found.</b> ${esc(data?.message || data?.error || 'Movie not found.')}`;
+      return;
+    }
+
+    detail.className = 'panel';
+    detail.innerHTML = `
+      <h2>${esc(data.title)}</h2>
+      <p class="meta">${esc(data.director)} · ${data.year}</p>
+      <form id="updateForm" onsubmit="updateMovie(event, ${data.id})">
+        <div class="form-row">
+          <label>Title<input id="updateTitle" type="text" value="${esc(data.title)}" required></label>
+          <label>Director<input id="updateDirector" type="text" value="${esc(data.director)}" required></label>
+        </div>
+        <div class="form-row">
+          <label>Year<input id="updateYear" type="number" min="1888" value="${esc(data.year)}" required></label>
+          <label>Watched<select id="updateWatched"><option value="false">No</option><option value="true">Yes</option></select></label>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Save changes</button>
+          <button type="button" onclick="deleteMovie(${data.id})">Delete movie</button>
+        </div>
+      </form>`;
+    $("#updateWatched").value = data.watched ? 'true' : 'false';
+  }
+
+  async function createMovie(event) {
+    event.preventDefault();
+    const payload = {
+      title: $("#titleInput").value.trim(),
+      director: $("#directorInput").value.trim(),
+      year: Number($("#yearInput").value),
+      watched: $("#watchedInput").value === 'true'
+    };
+    const { status, data } = await api('POST', '/movies', payload);
+    if (status === 201) {
+      $("#createForm").reset();
+      load();
+      openDetail(data.movie.id);
+    }
+  }
+
+  async function updateMovie(event, id) {
+    event.preventDefault();
+    const payload = {
+      title: $("#updateTitle").value.trim(),
+      director: $("#updateDirector").value.trim(),
+      year: Number($("#updateYear").value),
+      watched: $("#updateWatched").value === 'true'
+    };
+    const { status } = await api('PUT', `/movies/${id}`, payload);
+    if (status === 200) {
+      load();
+      openDetail(id);
+    }
+  }
+
+  async function deleteMovie(id) {
+    if (!confirm('Delete this movie?')) return;
+    const { status } = await api('DELETE', `/movies/${id}`);
+    if (status === 200) {
+      load();
+      const detail = $("#detail");
+      detail.hidden = true;
+    }
+  }
+
+  load();
+</script>
+</body>
+</html>
